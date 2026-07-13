@@ -1,5 +1,5 @@
-import { supabaseAdmin } from '@/lib/supabase';
-import { sendDailyAlertEmail } from '@/lib/email';
+import { supabaseAdmin } from '../../lib/supabase';
+import { sendDailyAlertEmail } from '../../lib/email';
 
 export const maxDuration = 300;
 
