@@ -1,3 +1,7 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
+const nextConfig = {
+  experimental: {
+    serverComponentsExternalPackages: ['@supabase/supabase-js', 'resend', 'docx']
+  }
+};
 export default nextConfig;
