@@ -1575,7 +1575,7 @@ function readAsText(file) {
 
 async function extractTextFromPDF(base64Data) {
   // Use Claude's vision to read the PDF
-  const key = API_KEY;
+  // API proxy handles auth
   const res = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1614,7 +1614,7 @@ async function extractProfileFromText(text, source) {
   importText.classList.add('loading');
   importText.textContent = source === 'resume' ? 'Extracting profile from your resume...' : 'Extracting profile from LinkedIn content...';
 
-  const key = API_KEY;
+  // API proxy handles auth
 
   try {
     const res = await fetch('/api/claude', {
