@@ -1,5 +1,10 @@
-import { redirect } from 'next/navigation';
-
 export default function Home() {
-  redirect('/app.html');
+  return (
+    <html>
+      <head>
+        <meta httpEquiv="refresh" content="0; url=/app.html" />
+      </head>
+      <body></body>
+    </html>
+  );
 }
