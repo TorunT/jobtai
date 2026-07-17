@@ -2536,47 +2536,34 @@ document.addEventListener('change', function(e) {
 function subscribeAlerts() {
   const email = document.getElementById('alert-email').value.trim();
   const statusEl = document.getElementById('subscribe-status');
+
   if (!email || !email.includes('@')) {
     statusEl.style.display = 'block';
     statusEl.style.color = '#8b1a1a';
     statusEl.textContent = 'Please enter a valid email address.';
     return;
   }
+
   const p = getProfile();
-  const airtableKey = document.getElementById('setup-airtable-key').value.trim();
-  const airtableBase = document.getElementById('setup-airtable-base').value.trim();
 
-  if (!airtableKey || !airtableBase) {
-    // Save locally for now, remind user to set up Airtable
-    const sub = {
-      email, profile: p.summary, skills: p.skills, experience: p.experience,
-      name: p.name, location: p.location, role: p.role,
-      alertTime: document.getElementById('alert-time').value,
-      alertCount: document.getElementById('alert-count').value,
-      includeResume: document.getElementById('alert-resume').value,
-      subscribedAt: new Date().toISOString()
-    };
-    localStorage.setItem('jobtai_alert_sub', JSON.stringify(sub));
-    statusEl.style.display = 'block';
-    statusEl.style.color = 'var(--green)';
-    statusEl.innerHTML = `✓ Saved! To actually receive daily emails, complete Step 2 & 3 above (Airtable + Make setup). Your profile has been saved locally in the meantime.`;
-    return;
-  }
-
-  // Save to Airtable
   statusEl.style.display = 'block';
   statusEl.style.color = 'var(--ink3)';
-  statusEl.textContent = 'Saving your subscription...';
+  statusEl.textContent = 'Subscribing you to daily alerts...';
 
-  fetch(`/api/subscribe`, {
+  fetch('/api/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email, name: p.name||'', profile: p.summary||'',
-      skills: p.skills||'', experience: p.experience||'',
-      education: p.education||'', role: p.role||'',
-      location: p.location||'', linkedin: p.linkedin||'',
-      preferences: Array.from(document.querySelectorAll('.pref-check:checked')).map(el=>el.value),
+      email,
+      name: p.name || '',
+      profile: p.summary || '',
+      skills: p.skills || '',
+      experience: p.experience || '',
+      education: p.education || '',
+      role: p.role || '',
+      location: p.location || '',
+      linkedin: p.linkedin || '',
+      preferences: Array.from(document.querySelectorAll('.pref-check:checked')).map(el => el.value),
       alertTime: document.getElementById('alert-time').value,
       alertCount: document.getElementById('alert-count').value,
       includeResume: document.getElementById('alert-resume').value,
@@ -2586,10 +2573,13 @@ function subscribeAlerts() {
   .then(data => {
     if (data.success) {
       statusEl.style.color = 'var(--green)';
-      statusEl.innerHTML = `✓ You're subscribed! Daily job alerts will arrive at <strong>${email}</strong> every morning. Check your spam folder on the first day.`;
+      statusEl.style.background = 'var(--green-light)';
+      statusEl.style.padding = '10px 14px';
+      statusEl.style.borderRadius = '8px';
+      statusEl.innerHTML = `✓ Subscribed! Daily job alerts will arrive at <strong>${email}</strong> every morning at 8:00 AM. Check your spam folder on the first day.`;
     } else {
       statusEl.style.color = '#8b1a1a';
-      statusEl.textContent = 'Error saving: ' + (data.error?.message || 'Unknown error. Check your Airtable key and Base ID.');
+      statusEl.textContent = 'Error: ' + (data.error || 'Something went wrong. Please try again.');
     }
   })
   .catch(e => {
@@ -2598,165 +2588,4 @@ function subscribeAlerts() {
   });
 }
 
-function downloadMakeBlueprint() {
-  const claudeKey = document.getElementById('setup-claude-key').value.trim();
-  const resendKey = document.getElementById('setup-resend-key').value.trim();
-  const airtableKey = document.getElementById('setup-airtable-key').value.trim();
-  const airtableBase = document.getElementById('setup-airtable-base').value.trim();
-  const fromEmail = document.getElementById('setup-from-email').value.trim();
-
-  const blueprint = {
-    name: "JobTAi Daily Job Alerts",
-    description: "Runs daily at 8:00 AM. Reads subscribers from Airtable, searches for jobs using Claude AI with web search, and sends personalized job alert emails via Resend.",
-    config: {
-      schedule: "0 8 * * *",
-      timezone: "America/New_York"
-    },
-    credentials: {
-      anthropic_api_key: claudeKey || "YOUR_CLAUDE_API_KEY",
-      resend_api_key: resendKey || "YOUR_RESEND_API_KEY",
-      airtable_api_key: airtableKey || "YOUR_AIRTABLE_API_KEY",
-      airtable_base_id: airtableBase || "YOUR_AIRTABLE_BASE_ID",
-      from_email: fromEmail || "alerts@yourdomain.com"
-    },
-    steps: [
-      {
-        step: 1,
-        name: "Read subscribers from Airtable",
-        type: "HTTP GET",
-        url: `https://api.airtable.com/v0/{{airtable_base_id}}/Subscribers?filterByFormula={Active}=1`,
-        headers: { "Authorization": "Bearer {{airtable_api_key}}" }
-      },
-      {
-        step: 2,
-        name: "For each subscriber — search for jobs with Claude",
-        type: "HTTP POST",
-        url: "https://api.anthropic.com/v1/messages",
-        headers: { "x-api-key": "{{anthropic_api_key}}", "anthropic-version": "2023-06-01" },
-        body: {
-          model: "claude-sonnet-4-6",
-          max_tokens: 8000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: "Search LinkedIn Jobs, Indeed, Greenhouse, and Built In NYC for real current job listings matching this candidate. Return JSON array of top {{alert_count}} jobs with: title, company, location, salary, source, score (0-100), applyUrl, tags[], desc.\n\nCANDIDATE: Role: {{role}}, Location: {{location}}, Summary: {{profile}}, Skills: {{skills}}, Experience: {{experience}}" }]
-        }
-      },
-      {
-        step: 3,
-        name: "If IncludeResume=yes — generate resume text for each job",
-        type: "HTTP POST (conditional)",
-        url: "https://api.anthropic.com/v1/messages",
-        note: "Only runs if subscriber.IncludeResume is 'yes'. Calls Claude to generate ATS resume text for each job found in step 2."
-      },
-      {
-        step: 4,
-        name: "Send email via Resend",
-        type: "HTTP POST",
-        url: "https://api.resend.com/emails",
-        headers: { "Authorization": "Bearer {{resend_api_key}}" },
-        body: {
-          from: "{{from_email}}",
-          to: "{{subscriber_email}}",
-          subject: "Your daily job matches — {{today_date}}",
-          html: "{{email_html_template}}"
-        }
-      }
-    ],
-    instructions: [
-      "1. Go to make.com and create a free account",
-      "2. Create new scenario → click the 3-dot menu → Import Blueprint",
-      "3. Upload this JSON file",
-      "4. Fill in your credentials when prompted",
-      "5. Set the schedule trigger to 'Every day at 8:00 AM'",
-      "6. Click 'Activate scenario'",
-      "7. Test with 'Run once' to verify emails are sent correctly"
-    ]
-  };
-
-  const blob = new Blob([JSON.stringify(blueprint, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'JobTAi_Make_Blueprint.json';
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-}
-
-function downloadEmailTemplate() {
-  const siteUrl = window.location.origin + window.location.pathname;
-  const template = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Your Daily Job Matches</title>
-</head>
-<body style="margin:0;padding:0;background:#f5f3ef;font-family:'Helvetica Neue',Arial,sans-serif;">
-<div style="max-width:600px;margin:0 auto;padding:24px 16px;">
-
-  <!-- Header -->
-  <div style="background:#1a4a2e;border-radius:12px;padding:24px;text-align:center;margin-bottom:20px;">
-    <div style="font-family:Georgia,serif;font-size:26px;font-weight:700;color:#fff;letter-spacing:-0.5px;">Job<span style="color:#c9a84c;">TA</span>i</div>
-    <div style="font-size:13px;color:rgba(255,255,255,0.7);margin-top:6px;">Your daily job matches — {{TODAY_DATE}}</div>
-  </div>
-
-  <!-- Intro -->
-  <div style="background:#fff;border-radius:12px;padding:18px 20px;margin-bottom:16px;border:1px solid #e5e1d8;">
-    <p style="font-size:14px;color:#3d3b36;line-height:1.6;margin:0;">Hi {{SUBSCRIBER_NAME}}, here are today's top {{ALERT_COUNT}} job matches for <strong>{{TARGET_ROLE}}</strong> in <strong>{{LOCATION}}</strong>.</p>
-  </div>
-
-  <!-- Job cards - repeat this block for each job -->
-  {{JOB_CARDS}}
-
-  <!-- Resume section -->
-  {{RESUME_SECTION}}
-
-  <!-- Footer -->
-  <div style="text-align:center;padding:20px 0 0;font-size:11px;color:#9e9b94;line-height:1.7;">
-    You're receiving this because you subscribed to daily job alerts on JobTAi.<br>
-    <a href="${siteUrl}#unsubscribe" style="color:#9e9b94;">Unsubscribe</a> · 
-    <a href="${siteUrl}" style="color:#1a4a2e;font-weight:500;">Open JobTAi →</a><br><br>
-    JobTAi is not affiliated with LinkedIn, Indeed, Greenhouse, or Built In NYC.<br>
-    Always verify listings before applying. AI-generated resume content should be reviewed before submission.
-  </div>
-
-</div>
-</body>
-</html>`;
-
-  const jobCardTemplate = `
-  <!-- PASTE THIS FOR EACH JOB (replace placeholder values) -->
-  <div style="background:#fff;border-radius:12px;padding:18px 20px;margin-bottom:12px;border:1px solid #e5e1d8;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px;">
-      <div>
-        <div style="font-size:15px;font-weight:600;color:#1a1916;">{{JOB_TITLE}}</div>
-        <div style="font-size:13px;color:#6b6860;margin-top:2px;">{{COMPANY}} · {{LOCATION}}</div>
-      </div>
-      <span style="background:#e4efe8;color:#1a4a2e;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;white-space:nowrap;">{{MATCH_SCORE}}% match</span>
-    </div>
-    <div style="background:#f7f5f0;border-radius:6px;height:5px;margin:8px 0;overflow:hidden;">
-      <div style="background:#1a4a2e;width:{{MATCH_SCORE}}%;height:100%;border-radius:6px;"></div>
-    </div>
-    <div style="font-size:12px;color:#6b6860;margin-bottom:4px;">via {{SOURCE}} · {{SALARY}}</div>
-    <div style="font-size:13px;color:#3d3b36;line-height:1.6;margin-bottom:12px;">{{JOB_DESC}}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <a href="{{APPLY_URL}}" style="background:#1a4a2e;color:#fff;font-size:13px;font-weight:600;padding:8px 16px;border-radius:8px;text-decoration:none;display:inline-block;">Apply Now ↗</a>
-      <a href="${siteUrl}" style="background:#f7f5f0;color:#1a1916;font-size:13px;font-weight:500;padding:8px 16px;border-radius:8px;text-decoration:none;display:inline-block;border:1px solid #e5e1d8;">Tailor resume in JobTAi →</a>
-    </div>
-  </div>`;
-
-  const fullTemplate = template.replace('{{JOB_CARDS}}', jobCardTemplate).replace('{{RESUME_SECTION}}', `
-  <!-- Resume section - only include if subscriber chose include resume -->
-  <div style="background:#fff;border-radius:12px;padding:18px 20px;margin-bottom:12px;border:1px solid #e5e1d8;">
-    <div style="font-size:14px;font-weight:600;color:#1a4a2e;margin-bottom:8px;">📄 Tailored resume for {{JOB_TITLE}} at {{COMPANY}}</div>
-    <pre style="font-size:11px;line-height:1.8;color:#3d3b36;white-space:pre-wrap;font-family:'Courier New',monospace;background:#f7f5f0;padding:14px;border-radius:8px;">{{RESUME_CONTENT}}</pre>
-    <a href="${siteUrl}" style="font-size:12px;color:#1a4a2e;">Open in JobTAi to download as Word (.docx) →</a>
-  </div>`);
-
-  const blob = new Blob([fullTemplate], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'JobTAi_Email_Template.html';
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-}</script>
-</body>
-</html>
+</script></html>
