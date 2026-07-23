@@ -3,6 +3,7 @@ export const maxDuration = 60;
 export async function POST(request) {
   try {
     const body = await request.json();
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -10,11 +11,26 @@ export async function POST(request) {
         'x-api-key': process.env.ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        stream: true,
+      }),
     });
-    const data = await response.json();
-    return Response.json(data, { status: response.status });
+
+    // Stream'i direkt kullaniciya ilet
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+
   } catch (error) {
-    return Response.json({ error: { message: error.message } }, { status: 500 });
+    return Response.json(
+      { error: { message: error.message } },
+      { status: 500 }
+    );
   }
 }
