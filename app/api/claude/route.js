@@ -11,21 +11,11 @@ export async function POST(request) {
         'x-api-key': process.env.ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({
-        ...body,
-        stream: true,
-      }),
+      body: JSON.stringify(body),
     });
 
-    // Stream'i direkt kullaniciya ilet
-    return new Response(response.body, {
-      status: response.status,
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    const data = await response.json();
+    return Response.json(data, { status: response.status });
 
   } catch (error) {
     return Response.json(
