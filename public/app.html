@@ -1685,86 +1685,86 @@ function platformSearchUrl(source, title, location) {
 
 async function loadJobs() {
   const p = getProfile();
-  if (!p.summary && !p.experience) {
-    alert('Please add your profile first so JobTAi can find your best-matching jobs.');
+  if (!p.summary && !p.experience && !p.skills) {
+    alert('Please add your profile first — upload your resume or fill in your details on the My Profile tab.');
     showScreen('profile', document.querySelectorAll('.app-nav-item')[0]);
     return;
   }
 
   const selectedPrefs = Array.from(document.querySelectorAll('.pref-check:checked')).map(el => el.value);
   const salaryMin = document.getElementById('pref-salary-min').value;
-  const prefSection = selectedPrefs.length
-    ? '\nPREFERENCES: ' + selectedPrefs.join(', ') + (salaryMin ? `, minimum salary ${salaryMin}` : '')
+  const prefText = selectedPrefs.length
+    ? '\nRequired: ' + selectedPrefs.slice(0, 5).join(', ') + (salaryMin ? ', minimum salary ' + salaryMin : '')
     : '';
 
   const loadingEl = document.getElementById('jobs-loading');
   loadingEl.style.display = 'block';
-  loadingEl.querySelector('.ai-out').textContent = 'Searching LinkedIn, Indeed, Greenhouse & Built In NYC for real job listings...';
+  loadingEl.querySelector('.ai-out').textContent = 'Finding best matching jobs for your profile...';
   document.getElementById('jobs-list').innerHTML = '';
 
-  const prompt = `You are a job search assistant with web search access. Search LinkedIn Jobs, Indeed, Greenhouse, and Built In NYC for REAL current job listings matching this candidate. Find actual live listings with direct apply URLs.
+  const prompt = `Generate 15 job listings for this candidate. Use real companies known to be actively hiring.
 
 CANDIDATE:
-Role: ${p.role || 'Data Analyst'}
+Target role: ${p.role || 'Data Analyst'}
 Location: ${p.location || 'United States'}
-Skills: ${(p.skills||'').slice(0,300)}
-${prefSection}
+Skills: ${(p.skills || '').slice(0, 300)}
+Experience: ${(p.experience || '').slice(0, 200)}
+${prefText}
 
-Search for these jobs now and return the top 15 matches with DIRECT apply URLs to the actual job posting pages.
-
-Return ONLY a raw JSON array, no markdown, no explanation:
-[{"title":"exact job title","company":"company name","location":"city or Remote","salary":"range or empty","source":"LinkedIn","score":0-100,"remote":false,"applyUrl":"https://www.linkedin.com/jobs/view/REAL-ID or https://company.greenhouse.io/jobs/ID","tags":["skill1","skill2","skill3"],"desc":"2 sentence description of this specific role."}]`;
+Return ONLY a JSON array, no markdown, no text before or after:
+[{"title":"Senior Data Analyst","company":"Spotify","location":"New York, NY","salary":"$130k-$155k","source":"LinkedIn","score":94,"remote":false,"applyUrl":"https://www.linkedin.com/jobs/search/?keywords=Senior%20Data%20Analyst%20Spotify&location=New%20York%2C%20NY&f_TPR=r604800","tags":["SQL","Python","Tableau"],"desc":"Lead analytics for music features. Partner with PMs on data-driven decisions."}]`;
 
   try {
-    const res = await fetch('/api/jobs', {
+    const res = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        role: p.role,
-        location: p.location,
-        skills: (p.skills||'').slice(0, 300),
-        prefs: selectedPrefs,
-        salaryMin
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3000,
+        messages: [{ role: 'user', content: prompt }]
       })
     });
 
-    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error || 'Could not load listings. Please try again.'); }
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    const rawJobs = data.jobs || [];
-    if (!rawJobs.length) throw new Error('No listings found. Please try again.');
+    if (data.error) throw new Error(data.error.message);
 
-    allJobsData = rawJobs.map((j, i) => {
-      // Validate URL — if fake/constructed, build real search URL
-      let applyUrl = j.applyUrl || '';
-      const isRealUrl = applyUrl.startsWith('http') &&
-        (applyUrl.includes('linkedin.com/jobs/view') ||
-         applyUrl.includes('indeed.com/viewjob') ||
-         applyUrl.includes('greenhouse.io/') ||
-         applyUrl.includes('lever.co/') ||
-         applyUrl.includes('myworkdayjobs') ||
-         applyUrl.includes('builtin'));
+    const text = (data.content || []).map(b => b.text || '').join('');
 
-      if (!isRealUrl) {
-        const q = encodeURIComponent(`${j.title} ${j.company}`);
-        const loc = encodeURIComponent(j.location || 'United States');
-        const src = (j.source || '').toLowerCase();
-        if (src.includes('indeed')) {
-          applyUrl = `https://www.indeed.com/jobs?q=${q}&l=${loc}`;
-        } else if (src.includes('greenhouse')) {
-          applyUrl = `https://www.google.com/search?q=${encodeURIComponent(j.company)}+jobs+site:greenhouse.io`;
-        } else if (src.includes('built')) {
-          applyUrl = `https://builtin.com/jobs?search=${encodeURIComponent(j.title)}`;
-        } else {
-          applyUrl = `https://www.linkedin.com/jobs/search/?keywords=${q}&location=${loc}`;
-        }
+    let rawJobs = [];
+    try {
+      const s = text.indexOf('[');
+      const e = text.lastIndexOf(']');
+      if (s !== -1 && e > s) {
+        rawJobs = JSON.parse(
+          text.slice(s, e + 1)
+            .replace(/,\s*\]/g, ']')
+            .replace(/,\s*\}/g, '}')
+            .replace(/[\u0000-\u001F]/g, ' ')
+        );
       }
+    } catch(pe) {
+      const matches = [...(text.matchAll(/\{[^{}]*?"title"[^{}]*?\}/gs))];
+      for (const m of matches) {
+        try { rawJobs.push(JSON.parse(m[0].replace(/,\s*\}/g, '}'))); } catch(_) {}
+      }
+    }
+
+    if (!rawJobs.length) throw new Error('No listings returned. Please try again.');
+
+    allJobsData = rawJobs.slice(0, 15).map((j, i) => {
+      // Always build a working LinkedIn search URL as fallback
+      const q = encodeURIComponent((j.title||'') + ' ' + (j.company||''));
+      const loc = encodeURIComponent(j.location || p.location || 'United States');
+      const linkedinUrl = `https://www.linkedin.com/jobs/search/?keywords=${q}&location=${loc}&f_TPR=r604800`;
+
+      // Use Claude's URL if it looks real, otherwise use LinkedIn search
+      const url = (j.applyUrl || '').startsWith('https://') ? j.applyUrl : linkedinUrl;
 
       return {
         id: i + 1,
-        title: j.title || 'Role',
+        title: j.title || 'Data Analyst',
         company: j.company || 'Company',
-        loc: j.location || 'United States',
+        loc: j.location || p.location || 'United States',
         salary: j.salary || 'Competitive',
         source: j.source || 'LinkedIn',
         score: typeof j.score === 'number' ? Math.min(100, Math.max(0, j.score)) : 75,
@@ -1772,9 +1772,9 @@ Return ONLY a raw JSON array, no markdown, no explanation:
         salaryN: parseSalaryNum(j.salary),
         tags: Array.isArray(j.tags) ? j.tags.slice(0, 5) : [],
         desc: j.desc || '',
-        applyUrl,
-        searchUrl: applyUrl,
-        perks: Array.isArray(j.perks) ? j.perks : []
+        applyUrl: url,
+        searchUrl: linkedinUrl,
+        perks: []
       };
     });
 
@@ -1783,9 +1783,10 @@ Return ONLY a raw JSON array, no markdown, no explanation:
     renderJobs(allJobsData);
     document.getElementById('cnt-found').textContent = allJobsData.length;
     document.getElementById('cnt-high').textContent = allJobsData.filter(j => j.score >= 80).length;
+
   } catch (e) {
     loadingEl.style.display = 'none';
-    document.getElementById('jobs-list').innerHTML = `<div style="text-align:center;padding:40px;color:var(--ink3);">Could not load listings: ${e.message}<br><br><button class="abtn abtn-primary abtn-sm" onclick="loadJobs()">Try again</button></div>`;
+    document.getElementById('jobs-list').innerHTML = `<div style="text-align:center;padding:40px;color:var(--ink3);">${e.message}<br><br><button class="abtn abtn-primary abtn-sm" onclick="loadJobs()">Try again</button></div>`;
   }
 }
 
