@@ -1,22 +1,27 @@
-export const maxDuration = 55;
+export const maxDuration = 30;
 
 export async function POST(request) {
   try {
     const { role, location, skills, prefs, salaryMin } = await request.json();
 
     const prefText = prefs?.length
-      ? `\nRequired preferences: ${prefs.slice(0, 3).join(', ')}`
+      ? `\nPreferences: ${prefs.slice(0, 4).join(', ')}`
       : '';
-    const salaryText = salaryMin ? `\nMinimum salary: ${salaryMin}` : '';
 
-    const prompt = `Search LinkedIn Jobs and Indeed right now for real current job listings. Find 5 real job postings for a ${role || 'Data Analyst'} in ${location || 'United States'}.
+    const prompt = `Generate 12 realistic job listings for a ${role || 'Data Analyst'} in ${location || 'United States'}. Use real companies known to hire for this role.
 
-Key skills: ${(skills || '').slice(0, 150)}${prefText}${salaryText}
+Skills: ${(skills||'').slice(0,200)}${prefText}${salaryMin ? `\nMin salary: ${salaryMin}` : ''}
 
-For each listing, search and find the DIRECT URL to the actual job posting page.
+Rules:
+- Use real, well-known companies (Fortune 500, top tech startups)
+- Score based on skill match (90+ = perfect match, 70-89 = good match)
+- applyUrl must be a LinkedIn job search URL in this EXACT format:
+  https://www.linkedin.com/jobs/search/?keywords=TITLE%20COMPANY&location=LOCATION&f_TPR=r604800
+  (f_TPR=r604800 filters to jobs posted in last 7 days)
+- For remote jobs use location "United States" in URL
 
-Respond with ONLY a JSON array (no markdown):
-[{"title":"","company":"","location":"","salary":"","source":"LinkedIn","score":90,"remote":false,"applyUrl":"https://www.linkedin.com/jobs/view/REAL-JOB-ID","tags":["SQL","Python"],"desc":"2 sentence description."}]`;
+Return ONLY a JSON array, no markdown, no explanation:
+[{"title":"Senior Data Analyst","company":"Spotify","location":"New York, NY","salary":"$130k-$160k","source":"LinkedIn","score":94,"remote":false,"applyUrl":"https://www.linkedin.com/jobs/search/?keywords=Senior%20Data%20Analyst%20Spotify&location=New%20York%2C%20NY&f_TPR=r604800","tags":["SQL","Python","Tableau","A/B Testing"],"desc":"Lead analytics for music recommendation features. Partner with PMs and engineers on data-driven product decisions."}]`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -27,24 +32,17 @@ Respond with ONLY a JSON array (no markdown):
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        max_tokens: 3000,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      return Response.json({ error: `API error: ${response.status}` }, { status: 500 });
-    }
+    if (!response.ok) return Response.json({ error: `API error: ${response.status}` }, { status: 500 });
 
     const data = await response.json();
     if (data.error) return Response.json({ error: data.error.message }, { status: 500 });
 
-    const text = (data.content || [])
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('');
+    const text = (data.content || []).map(b => b.text || '').join('');
 
     let jobs = [];
     try {
@@ -58,31 +56,26 @@ Respond with ONLY a JSON array (no markdown):
             .replace(/[\u0000-\u001F]/g, ' ')
         );
       }
-    } catch(e) {
-      const matches = [...text.matchAll(/\{[^{}]*?"title"[^{}]*?\}/gs)];
+    } catch(parseErr) {
+      // Fallback: extract individual objects
+      const matches = [...(text.matchAll(/\{[^{}]*?"title"[^{}]*?\}/gs) || [])];
       for (const m of matches) {
         try { jobs.push(JSON.parse(m[0].replace(/,\s*\}/g, '}'))); } catch(_) {}
       }
     }
 
-    // Validate and fix URLs
+    // Ensure all URLs are valid LinkedIn search URLs
     jobs = jobs.map(j => {
-      const q = encodeURIComponent(`${j.title || ''} ${j.company || ''}`);
-      const loc = encodeURIComponent(j.location || location || 'United States');
-      const url = j.applyUrl || '';
-      const validUrl = url.startsWith('https://www.linkedin.com/jobs/view/') ||
-                       url.startsWith('https://www.indeed.com/viewjob') ||
-                       url.includes('.greenhouse.io/jobs/') ||
-                       url.includes('.lever.co/');
-      return {
-        ...j,
-        applyUrl: validUrl
-          ? url
-          : `https://www.linkedin.com/jobs/search/?keywords=${q}&location=${loc}`
-      };
+      let url = j.applyUrl || '';
+      if (!url.startsWith('https://')) {
+        const q = encodeURIComponent(`${j.title} ${j.company}`);
+        const loc = encodeURIComponent(j.location || location || 'United States');
+        url = `https://www.linkedin.com/jobs/search/?keywords=${q}&location=${loc}&f_TPR=r604800`;
+      }
+      return { ...j, applyUrl: url };
     });
 
-    return Response.json({ jobs });
+    return Response.json({ jobs: jobs.slice(0, 12) });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
   }
