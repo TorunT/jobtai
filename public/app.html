@@ -1728,7 +1728,7 @@ Return ONLY a raw JSON array, no markdown, no explanation:
       })
     });
 
-    if (!res.ok) throw new Error('Search timed out. Please try again.');
+    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error || 'Could not load listings. Please try again.'); }
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     const rawJobs = data.jobs || [];
